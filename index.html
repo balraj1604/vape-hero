@@ -260,33 +260,61 @@ deviceTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
 const DEV_RATIO = 0.3286;
 const DEV_H = 4.0;
-const deviceMat = new THREE.ShaderMaterial({
-  transparent: true, depthWrite: true,
-  uniforms: { uTex:{ value:deviceTex }, uHue:{ value:FLAVORS[0].hue*Math.PI/180 } },
+const DEV_W = DEV_H*DEV_RATIO;
+const DEV_D = 0.16;                       // slab thickness — the device has real depth now
+
+const HUE_FN = `
+  vec3 hueRot(vec3 c, float a){
+    const vec3 k = vec3(0.57735);
+    float ca = cos(a);
+    return c*ca + cross(k,c)*sin(a) + k*dot(k,c)*(1.0-ca);
+  }`;
+
+const uHue = { value: FLAVORS[0].hue*Math.PI/180 };   // shared by face + edge materials
+
+// front / back faces — the real photo, band hue-morphs per flavor
+const faceMat = new THREE.ShaderMaterial({
+  transparent:true, depthWrite:true, side:THREE.FrontSide,
+  uniforms: { uTex:{ value:deviceTex }, uHue },
   vertexShader: `
     varying vec2 vUv;
     void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
   fragmentShader: `
     precision highp float;
     uniform sampler2D uTex; uniform float uHue; varying vec2 vUv;
-    vec3 hueRot(vec3 c, float a){
-      const vec3 k = vec3(0.57735);
-      float ca = cos(a);
-      return c*ca + cross(k,c)*sin(a) + k*dot(k,c)*(1.0-ca);
-    }
+    ${HUE_FN}
     void main(){
       vec4 t = texture2D(uTex, vUv);
       if (t.a < 0.02) discard;
-      vec3 c = clamp(hueRot(t.rgb, uHue), 0.0, 1.0);
-      gl_FragColor = vec4(c, t.a);
+      gl_FragColor = vec4(clamp(hueRot(t.rgb, uHue), 0.0, 1.0), t.a);
     }`,
 });
-const device = new THREE.Mesh(new THREE.PlaneGeometry(DEV_H*DEV_RATIO, DEV_H), deviceMat);
+// thin slab edge — dark leather that recolors with the same hue
+const edgeMat = new THREE.ShaderMaterial({
+  uniforms: { uHue, uBase:{ value:new THREE.Color(0x4a1014) } },
+  vertexShader: `void main(){ gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `
+    precision highp float;
+    uniform float uHue; uniform vec3 uBase;
+    ${HUE_FN}
+    void main(){ gl_FragColor = vec4(clamp(hueRot(uBase, uHue), 0.0, 1.0), 1.0); }`,
+});
+
+const device = new THREE.Group();
+const frontPlane = new THREE.Mesh(new THREE.PlaneGeometry(DEV_W, DEV_H), faceMat);
+frontPlane.position.z = DEV_D/2;
+const backPlane = new THREE.Mesh(new THREE.PlaneGeometry(DEV_W, DEV_H), faceMat);
+backPlane.position.z = -DEV_D/2; backPlane.rotation.y = Math.PI;        // reads correctly from behind
+const edge = new THREE.Mesh(new THREE.BoxGeometry(DEV_W*0.8, DEV_H*0.9, DEV_D), edgeMat);
+device.add(edge, frontPlane, backPlane);
 device.position.y = -0.25;
 scene.add(device);
 
-const TOP_Y  = device.position.y + DEV_H/2;
-const EMIT_Y = TOP_Y - 0.42;
+// mouthpiece tracked in world space so smoke emits from it while the device tumbles
+const localTop = new THREE.Vector3(0, DEV_H/2 - 0.42, 0);
+const upLocal  = new THREE.Vector3(0, 1, 0);
+const emitPos  = new THREE.Vector3();
+const upDir    = new THREE.Vector3();
 
 /* ----------------------------------------------------------------- *
  *  SMOKE TEXTURE — baked fBm puff WITH volumetric shading
@@ -339,7 +367,7 @@ const smokeTex = makeSmokeTexture();
 /* ----------------------------------------------------------------- *
  *  SMOKE PARTICLES — dense rotating volumetric billboards
  * ----------------------------------------------------------------- */
-const MAX = 1800;
+const MAX = 2200;
 const pos    = new Float32Array(MAX*3);
 const aSize  = new Float32Array(MAX);
 const aAlpha = new Float32Array(MAX);
@@ -393,25 +421,26 @@ function spawn(expand){
     const p = P[i];
     if (!p.dead) continue;
     p.dead = false;
-    p.x = (Math.random()-0.5)*0.10;
-    p.y = EMIT_Y + Math.random()*0.05;
-    p.z = 0.15 + Math.random()*0.32;
-    p.vx = (Math.random()-0.5)*0.10;
-    p.vy = 0.55 + Math.random()*0.5;
-    p.vz = (Math.random()-0.5)*0.07;
+    const sp = 0.5 + Math.random()*0.4;
+    p.x = emitPos.x + (Math.random()-0.5)*0.10;
+    p.y = emitPos.y + (Math.random()-0.5)*0.04;
+    p.z = emitPos.z + (Math.random()-0.5)*0.10;
+    p.vx = upDir.x*sp*0.55 + (Math.random()-0.5)*0.12;        // follows the mouthpiece...
+    p.vy = (upDir.y*0.55 + 0.5)*sp + Math.random()*0.18;      // ...but biased to rise
+    p.vz = upDir.z*sp*0.55 + (Math.random()-0.5)*0.10;
     p.life = 0;
-    p.max = 2.8 + Math.random()*2.0 + expand*2.8;
+    p.max = 3.0 + Math.random()*2.2 + expand*3.0;
     p.rot = Math.random()*6.28;
-    p.rotV = (Math.random()-0.5)*0.5;
-    p.base = 26 + Math.random()*40;
-    p.bright = 0.66 + Math.random()*0.42;
+    p.rotV = (Math.random()-0.5)*0.6;
+    p.base = 20 + Math.random()*70;                           // wide range: fine wisps + big billows
+    p.bright = 0.62 + Math.random()*0.46;
     p.seed = Math.random()*6.28;
     return;
   }
 }
 
 function updateSmoke(dt, expand, reduced){
-  const rate = (reduced ? 110 : 300) * (0.55 + expand*1.25);
+  const rate = (reduced ? 120 : 340) * (0.55 + expand*1.25);
   emitAcc += rate*dt;
   while (emitAcc > 1){ spawn(expand); emitAcc -= 1; }
 
@@ -425,21 +454,24 @@ function updateSmoke(dt, expand, reduced){
     const t = p.life / p.max;
     if (t >= 1){ p.dead=true; aAlpha[i]=0; aSize[i]=0; continue; }
 
-    const turb = (1.0 + t*2.4) * spread * swirl;
-    p.vx += Math.sin(p.y*1.7 + p.seed) * 0.05 * turb * dt * 6.0;
-    p.vz += Math.cos(p.y*1.4 + p.seed*1.7) * 0.04 * turb * dt * 6.0;
-    p.vy += 0.22 * dt;
-    p.vx *= 0.986; p.vz *= 0.986;
+    // two-octave curl turbulence -> wispy, branching tendrils
+    const turb = (0.8 + t*2.6) * spread * swirl;
+    p.vx += (Math.sin(p.y*1.7 + p.seed) + 0.5*Math.sin(p.y*3.4 + p.seed*2.1)) * 0.035 * turb * dt * 6.0;
+    p.vz += (Math.cos(p.y*1.4 + p.seed*1.7) + 0.5*Math.cos(p.y*3.1 + p.seed*1.3)) * 0.03 * turb * dt * 6.0;
+    p.vy += 0.16 * dt;                 // gentle buoyancy — the plume lingers
+    p.vx *= 0.985; p.vz *= 0.985; p.vy *= 0.995;
     p.rot += p.rotV * dt;
 
     p.x += p.vx*dt; p.y += p.vy*dt; p.z += p.vz*dt;
 
     const idx=i*3;
     pos[idx]=p.x; pos[idx+1]=p.y; pos[idx+2]=p.z;
-    aRot[i]=p.rot; aBright[i]=p.bright;
-    aSize[i]=p.base*(0.45 + t*(1.5 + expand*1.5));
-    const fade = Math.sin(Math.min(t,1)*Math.PI);
-    aAlpha[i] = fade * (0.34 - expand*0.06);          // dense overlap, no whiteout
+    aRot[i]=p.rot;
+    aBright[i]=p.bright*(1.0 - 0.38*t);                 // dissipation: older = greyer
+    aSize[i]=p.base*(0.40 + t*(1.7 + expand*1.6));
+    const fin  = Math.min(1, t/0.14);                    // quick fade-in at the tip
+    const fout = 1.0 - Math.min(1, Math.max(0,(t-0.45)/0.55));
+    aAlpha[i] = fin*fout*fout * (0.30 - expand*0.05);    // long natural fade-out tail
   }
   sGeo.attributes.position.needsUpdate = true;
   sGeo.attributes.aSize.needsUpdate = true;
@@ -512,7 +544,7 @@ function tick(now){
   const expand = Math.pow(progress, 0.85);
 
   const hue = lerpAngle(FLAVORS[i0].hue, FLAVORS[i1].hue, frac);
-  deviceMat.uniforms.uHue.value = hue * Math.PI/180;
+  uHue.value = hue * Math.PI/180;
 
   cA.set(FLAVORS[i0].color); cB.set(FLAVORS[i1].color);
   cMix.copy(cA).lerp(cB, frac);
@@ -528,9 +560,18 @@ function tick(now){
 
   const time = now/1000;
   if (!reduced){
-    device.rotation.y = Math.sin(time*0.35)*0.06;
-    device.position.x = Math.sin(time*0.5)*0.015;
+    device.rotation.y = Math.sin(time*0.32)*0.7;           // zero-g turn (stays readable, never edge-on)
+    device.rotation.z = 0.16 + Math.sin(time*0.5)*0.10;    // lazy lean
+    device.rotation.x = Math.sin(time*0.37)*0.12;          // drifting tumble
+    device.position.x = Math.sin(time*0.45)*0.06;
+    device.position.y = -0.25 + Math.sin(time*0.6)*0.14;   // float bob
+  } else {
+    device.rotation.z = 0.16;
   }
+  device.updateMatrixWorld(true);
+  emitPos.copy(localTop).applyMatrix4(device.matrixWorld); // mouthpiece in world space
+  upDir.copy(upLocal).transformDirection(device.matrixWorld);
+
   camera.position.z = 7.2 + expand*1.7;
   camera.position.y = 0.3 + expand*0.8;
   camera.lookAt(0, 0.5 + expand*0.9, 0);

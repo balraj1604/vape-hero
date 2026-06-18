@@ -260,8 +260,8 @@ deviceTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
 const DEV_RATIO = 0.3286;
 const DEV_H = 4.0;
-const DEV_W = DEV_H*DEV_RATIO;
-const DEV_D = 0.16;                       // slab thickness — the device has real depth now
+const DEV_R = 0.66;                       // body radius — front arc carries the photo
+const ARC   = 2.7;                        // ~155° of the tube shows the device face
 
 const HUE_FN = `
   vec3 hueRot(vec3 c, float a){
@@ -270,47 +270,56 @@ const HUE_FN = `
     return c*ca + cross(k,c)*sin(a) + k*dot(k,c)*(1.0-ca);
   }`;
 
-const uHue = { value: FLAVORS[0].hue*Math.PI/180 };   // shared by face + edge materials
+const uHue = { value: FLAVORS[0].hue*Math.PI/180 };
+const LEATHER = new THREE.Color(0x42100f);
 
-// front / back faces — the real photo, band hue-morphs per flavor
-const faceMat = new THREE.ShaderMaterial({
-  transparent:true, depthWrite:true, side:THREE.FrontSide,
-  uniforms: { uTex:{ value:deviceTex }, uHue },
+// rounded BODY: the photo is wrapped onto the front arc of a cylinder and lit,
+// so it reads as a real 3D cylindrical device instead of a flat card.
+const sideMat = new THREE.ShaderMaterial({
+  uniforms: { uTex:{value:deviceTex}, uHue, uLeather:{value:LEATHER}, uArc:{value:ARC} },
   vertexShader: `
-    varying vec2 vUv;
-    void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+    varying vec2 vUv; varying vec3 vN; varying float vAx; varying float vAz;
+    void main(){
+      vUv = uv; vN = normalize(normalMatrix * normal);
+      vAx = position.x; vAz = position.z;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+    }`,
   fragmentShader: `
     precision highp float;
-    uniform sampler2D uTex; uniform float uHue; varying vec2 vUv;
+    uniform sampler2D uTex; uniform float uHue; uniform vec3 uLeather; uniform float uArc;
+    varying vec2 vUv; varying vec3 vN; varying float vAx; varying float vAz;
     ${HUE_FN}
     void main(){
-      vec4 t = texture2D(uTex, vUv);
-      if (t.a < 0.02) discard;
-      gl_FragColor = vec4(clamp(hueRot(t.rgb, uHue), 0.0, 1.0), t.a);
+      float ang = atan(vAx, vAz);              // 0 at the front (+Z), faces camera
+      float u = ang/uArc + 0.5;
+      vec3 base = uLeather;
+      if (u > 0.0 && u < 1.0){
+        vec4 t = texture2D(uTex, vec2(u, vUv.y));
+        base = (t.a > 0.05) ? t.rgb : uLeather;
+      }
+      base = clamp(hueRot(base, uHue), 0.0, 1.0);
+      vec3 N = normalize(vN);
+      float d = max(dot(N, normalize(vec3(-0.35,0.42,0.85))), 0.0);
+      gl_FragColor = vec4(base * (0.28 + 0.88*d), 1.0);   // diffuse shading = round volume
     }`,
 });
-// thin slab edge — dark leather that recolors with the same hue
-const edgeMat = new THREE.ShaderMaterial({
-  uniforms: { uHue, uBase:{ value:new THREE.Color(0x4a1014) } },
+const capMat = new THREE.ShaderMaterial({
+  uniforms: { uHue, uLeather:{value:LEATHER} },
   vertexShader: `void main(){ gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
   fragmentShader: `
-    precision highp float;
-    uniform float uHue; uniform vec3 uBase;
-    ${HUE_FN}
-    void main(){ gl_FragColor = vec4(clamp(hueRot(uBase, uHue), 0.0, 1.0), 1.0); }`,
+    precision highp float; uniform float uHue; uniform vec3 uLeather; ${HUE_FN}
+    void main(){ gl_FragColor = vec4(clamp(hueRot(uLeather*0.45, uHue), 0.0, 1.0), 1.0); }`,
 });
 
-const device = new THREE.Group();
-const frontPlane = new THREE.Mesh(new THREE.PlaneGeometry(DEV_W, DEV_H), faceMat);
-frontPlane.position.z = DEV_D/2;
-const backPlane = new THREE.Mesh(new THREE.PlaneGeometry(DEV_W, DEV_H), faceMat);
-backPlane.position.z = -DEV_D/2; backPlane.rotation.y = Math.PI;        // reads correctly from behind
-const edge = new THREE.Mesh(new THREE.BoxGeometry(DEV_W*0.8, DEV_H*0.9, DEV_D), edgeMat);
-device.add(edge, frontPlane, backPlane);
+const device = new THREE.Mesh(
+  new THREE.CylinderGeometry(DEV_R, DEV_R, DEV_H, 80, 1, false),
+  [sideMat, capMat, capMat]
+);
+device.scale.z = 0.62;                    // flatten the tube into the device's oval cross-section
 device.position.y = -0.25;
 scene.add(device);
 
-// mouthpiece tracked in world space so smoke emits from it while the device tumbles
+// mouthpiece tracked in world space so smoke emits from it while the device turns
 const localTop = new THREE.Vector3(0, DEV_H/2 - 0.42, 0);
 const upLocal  = new THREE.Vector3(0, 1, 0);
 const emitPos  = new THREE.Vector3();

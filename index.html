@@ -180,11 +180,16 @@
   <div id="veil">PREPARING THE MIST…</div>
 
 <script type="importmap">
-{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+}}
 </script>
 
 <script type="module">
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 /* ----------------------------------------------------------------- *
  *  FLAVORS — full lineup. `hue` = degrees to rotate the RED base
@@ -251,79 +256,64 @@ const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
 camera.position.set(0, 0.3, 7.2);
 
 /* ----------------------------------------------------------------- *
- *  DEVICE — real CROWN BAR photo, band hue-morphs per flavor
+ *  LIGHTING + ENVIRONMENT (for the real PBR model)
  * ----------------------------------------------------------------- */
-const texLoader = new THREE.TextureLoader();
-const deviceTex = texLoader.load('device.png', () => boot());
-deviceTex.colorSpace = THREE.SRGBColorSpace;
-deviceTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
-const DEV_RATIO = 0.3286;
-const DEV_H = 4.0;
-const DEV_R = 0.66;                       // body radius — front arc carries the photo
-const ARC   = 2.7;                        // ~155° of the tube shows the device face
+const keyLight = new THREE.DirectionalLight(0xffffff, 2.4); keyLight.position.set(3,5,4); scene.add(keyLight);
+const rimLight = new THREE.DirectionalLight(0xffffff, 1.6); rimLight.position.set(-4,2,-3); scene.add(rimLight);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x0a0a12, 0.6));
+const accent = new THREE.PointLight(0x8a4fe0, 12, 22, 2); accent.position.set(0,1.6,2.6); scene.add(accent);
 
+/* ----------------------------------------------------------------- *
+ *  DEVICE — real Meshy 3D model. True 360° spin; leather hue-morphs.
+ * ----------------------------------------------------------------- */
+const BASE_HUE = 220;                      // model's leather is blue (~220°); flavors offset from it
 const HUE_FN = `
   vec3 hueRot(vec3 c, float a){
     const vec3 k = vec3(0.57735);
     float ca = cos(a);
     return c*ca + cross(k,c)*sin(a) + k*dot(k,c)*(1.0-ca);
   }`;
+const uHue = { value: (FLAVORS[0].hue - BASE_HUE)*Math.PI/180 };
 
-const uHue = { value: FLAVORS[0].hue*Math.PI/180 };
-const LEATHER = new THREE.Color(0x42100f);
-
-// rounded BODY: the photo is wrapped onto the front arc of a cylinder and lit,
-// so it reads as a real 3D cylindrical device instead of a flat card.
-const sideMat = new THREE.ShaderMaterial({
-  uniforms: { uTex:{value:deviceTex}, uHue, uLeather:{value:LEATHER}, uArc:{value:ARC} },
-  vertexShader: `
-    varying vec2 vUv; varying vec3 vN; varying float vAx; varying float vAz;
-    void main(){
-      vUv = uv; vN = normalize(normalMatrix * normal);
-      vAx = position.x; vAz = position.z;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
-    }`,
-  fragmentShader: `
-    precision highp float;
-    uniform sampler2D uTex; uniform float uHue; uniform vec3 uLeather; uniform float uArc;
-    varying vec2 vUv; varying vec3 vN; varying float vAx; varying float vAz;
-    ${HUE_FN}
-    void main(){
-      float ang = atan(vAx, vAz);              // 0 at the front (+Z), faces camera
-      float u = ang/uArc + 0.5;
-      vec3 base = uLeather;
-      if (u > 0.0 && u < 1.0){
-        vec4 t = texture2D(uTex, vec2(u, vUv.y));
-        base = (t.a > 0.05) ? t.rgb : uLeather;
-      }
-      base = clamp(hueRot(base, uHue), 0.0, 1.0);
-      vec3 N = normalize(vN);
-      float d = max(dot(N, normalize(vec3(-0.35,0.42,0.85))), 0.0);
-      gl_FragColor = vec4(base * (0.28 + 0.88*d), 1.0);   // diffuse shading = round volume
-    }`,
-});
-const capMat = new THREE.ShaderMaterial({
-  uniforms: { uHue, uLeather:{value:LEATHER} },
-  vertexShader: `void main(){ gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-  fragmentShader: `
-    precision highp float; uniform float uHue; uniform vec3 uLeather; ${HUE_FN}
-    void main(){ gl_FragColor = vec4(clamp(hueRot(uLeather*0.45, uHue), 0.0, 1.0), 1.0); }`,
-});
-
-const device = new THREE.Mesh(
-  new THREE.CylinderGeometry(DEV_R, DEV_R, DEV_H, 80, 1, false),
-  [sideMat, capMat, capMat]
-);
-device.scale.z = 0.62;                    // flatten the tube into the device's oval cross-section
-device.position.y = -0.25;
+const DEV_H = 3.4;
+const device = new THREE.Group();
+device.position.y = -0.05;
 scene.add(device);
 
-// mouthpiece tracked in world space so smoke emits from it while the device turns
-const localTop = new THREE.Vector3(0, DEV_H/2 - 0.42, 0);
+const localTop = new THREE.Vector3(0, DEV_H/2, 0);   // updated once the model is measured
 const upLocal  = new THREE.Vector3(0, 1, 0);
 const emitPos  = new THREE.Vector3();
 const upDir    = new THREE.Vector3();
+
+new GLTFLoader().load('device.glb', (gltf) => {
+  const m = gltf.scene;
+  const box = new THREE.Box3().setFromObject(m);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const s = DEV_H / size.y;
+  m.scale.setScalar(s);
+  m.position.set(-center.x*s, -center.y*s, -center.z*s);   // centre at the group origin
+  m.traverse(o => {
+    if (o.isMesh && o.material){
+      o.material.envMapIntensity = 1.15;
+      o.material.onBeforeCompile = (sh) => {                // inject leather hue-morph
+        sh.uniforms.uHue = uHue;
+        sh.fragmentShader = 'uniform float uHue;\n' + HUE_FN + '\n' + sh.fragmentShader
+          .replace('#include <color_fragment>',
+                   '#include <color_fragment>\n  diffuseColor.rgb = hueRot(diffuseColor.rgb, uHue);');
+      };
+      o.material.needsUpdate = true;
+    }
+  });
+  device.add(m);
+  localTop.set(0, (size.y*s)/2 * 0.96, 0);                 // mouthpiece just under the top
+  boot();
+});
 
 /* ----------------------------------------------------------------- *
  *  SMOKE TEXTURE — baked fBm puff WITH volumetric shading
@@ -553,11 +543,12 @@ function tick(now){
   const expand = Math.pow(progress, 0.85);
 
   const hue = lerpAngle(FLAVORS[i0].hue, FLAVORS[i1].hue, frac);
-  uHue.value = hue * Math.PI/180;
+  uHue.value = (hue - BASE_HUE) * Math.PI/180;
 
   cA.set(FLAVORS[i0].color); cB.set(FLAVORS[i1].color);
   cMix.copy(cA).lerp(cB, frac);
   smokeMat.uniforms.uColor.value.copy(smokeBase).lerp(cMix, 0.16);
+  accent.color.copy(cMix);
 
   const sA = new THREE.Color(FLAVORS[i0].soft), sB = new THREE.Color(FLAVORS[i1].soft);
   const softMix = sA.lerp(sB, frac);
@@ -569,13 +560,10 @@ function tick(now){
 
   const time = now/1000;
   if (!reduced){
-    device.rotation.y = Math.sin(time*0.32)*0.7;           // zero-g turn (stays readable, never edge-on)
-    device.rotation.z = 0.16 + Math.sin(time*0.5)*0.10;    // lazy lean
-    device.rotation.x = Math.sin(time*0.37)*0.12;          // drifting tumble
-    device.position.x = Math.sin(time*0.45)*0.06;
-    device.position.y = -0.25 + Math.sin(time*0.6)*0.14;   // float bob
-  } else {
-    device.rotation.z = 0.16;
+    device.rotation.y += dt*0.5;                            // true 360° zero-g spin
+    device.rotation.z = Math.sin(time*0.45)*0.07;          // lazy drift
+    device.position.x = Math.sin(time*0.4)*0.05;
+    device.position.y = -0.05 + Math.sin(time*0.6)*0.13;   // float bob
   }
   device.updateMatrixWorld(true);
   emitPos.copy(localTop).applyMatrix4(device.matrixWorld); // mouthpiece in world space
@@ -601,7 +589,7 @@ requestAnimationFrame(tick);
 
 let booted = false;
 function boot(){ if (booted) return; booted = true; document.getElementById('veil').classList.add('gone'); }
-setTimeout(boot, 2500);
+setTimeout(boot, 9000);   // safety: 6.5MB model may take a moment
 </script>
 </body>
 </html>

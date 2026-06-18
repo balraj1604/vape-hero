@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CROWN BAR — Scroll Flavor Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Noto+Sans+JP:wght@300;400;500;700&family=Noto+Serif+JP:wght@500;700;900&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #07070b;
+    --ink: #f4f1ea;
+    --muted: rgba(244, 241, 234, 0.55);
+    --gold: #c7a96b;
+    --flavor: #8a4fe0;
+    --flavor-soft: #b07cff;
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: auto; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Noto Sans JP", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  #stage { position: fixed; inset: 0; z-index: 0; }
+  #scene { width: 100%; height: 100%; display: block; }
+
+  #wash {
+    position: fixed; inset: 0; z-index: -1;
+    background:
+      radial-gradient(58% 50% at 50% 58%,
+        color-mix(in oklab, var(--flavor) 30%, transparent) 0%,
+        transparent 68%),
+      radial-gradient(120% 120% at 50% 120%, #0c0c14 0%, var(--bg) 60%);
+    transition: background 0.4s linear;
+  }
+
+  #scroller { position: relative; z-index: 2; }
+  .panel { height: 85vh; }
+
+  .overlay { position: fixed; inset: 0; z-index: 3; pointer-events: none; }
+
+  .topbar {
+    position: absolute; top: 0; left: 0; right: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 26px clamp(20px, 4vw, 56px);
+    font-size: 12px; letter-spacing: 0.32em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  .topbar .brand {
+    font-family: "Noto Serif JP", serif; font-weight: 900;
+    letter-spacing: 0.18em; color: var(--ink); font-size: 15px;
+  }
+  .topbar .brand b { color: var(--gold); }
+  .pill {
+    border: 1px solid rgba(244,241,234,0.22); border-radius: 999px;
+    padding: 7px 14px; font-size: 10px; letter-spacing: 0.28em;
+  }
+
+  .cols {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 clamp(20px, 5vw, 90px);
+  }
+  .col { width: min(30vw, 340px); }
+  .col.right { text-align: right; }
+
+  .kicker {
+    font-size: 11px; letter-spacing: 0.4em; text-transform: uppercase;
+    color: var(--flavor-soft); margin-bottom: 18px; transition: color 0.4s linear;
+  }
+  .flavor-en {
+    font-family: "Cormorant Garamond", serif; font-weight: 600;
+    font-size: clamp(2.4rem, 4.2vw, 4.1rem); line-height: 1.02; letter-spacing: -0.01em;
+  }
+  .flavor-jp {
+    font-family: "Noto Serif JP", serif; font-weight: 700;
+    font-size: clamp(1rem, 1.5vw, 1.35rem); margin-top: 12px; color: var(--ink);
+  }
+
+  .desc { font-size: 14px; line-height: 2.0; color: rgba(244,241,234,0.78); font-weight: 300; }
+  .notes {
+    list-style: none; margin-top: 22px;
+    display: flex; flex-direction: column; gap: 10px; align-items: flex-end;
+  }
+  .notes li {
+    font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink);
+    border: 1px solid color-mix(in oklab, var(--flavor) 55%, transparent);
+    border-radius: 999px; padding: 7px 15px;
+    background: color-mix(in oklab, var(--flavor) 12%, transparent);
+    transition: border-color 0.4s linear, background 0.4s linear;
+  }
+
+  .swap { transition: opacity 0.5s var(--ease), transform 0.6s var(--ease); }
+  .swap.out { opacity: 0; transform: translateY(14px); }
+
+  .rail {
+    position: absolute; right: clamp(14px, 2vw, 30px); top: 50%;
+    transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 9px; align-items: center;
+  }
+  .rail .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: rgba(244,241,234,0.18); transition: all 0.4s var(--ease);
+  }
+  .rail .dot.on {
+    background: var(--flavor-soft); transform: scale(1.7);
+    box-shadow: 0 0 14px var(--flavor-soft);
+  }
+
+  .hint {
+    position: absolute; bottom: 28px; left: 50%; transform: translateX(-50%);
+    font-size: 10px; letter-spacing: 0.4em; text-transform: uppercase; color: var(--muted);
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    transition: opacity 0.6s var(--ease);
+  }
+  .hint .line {
+    width: 1px; height: 38px;
+    background: linear-gradient(var(--flavor-soft), transparent);
+    animation: drift 2.2s var(--ease) infinite;
+  }
+  @keyframes drift {
+    0% { transform: scaleY(0); transform-origin: top; opacity: 0; }
+    40% { transform: scaleY(1); transform-origin: top; opacity: 1; }
+    60% { transform: scaleY(1); transform-origin: bottom; opacity: 1; }
+    100% { transform: scaleY(0); transform-origin: bottom; opacity: 0; }
+  }
+
+  #veil {
+    position: fixed; inset: 0; z-index: 50; background: var(--bg);
+    display: grid; place-items: center; transition: opacity 0.8s var(--ease);
+    font-family: "Noto Serif JP", serif; letter-spacing: 0.3em; color: var(--muted); font-size: 12px;
+  }
+  #veil.gone { opacity: 0; pointer-events: none; }
+
+  @media (max-width: 720px) {
+    .col { width: 42vw; }
+    .flavor-en { font-size: 1.9rem; }
+    .notes li { padding: 5px 10px; font-size: 9px; }
+    .desc { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .hint .line { animation: none; } }
+</style>
+</head>
+<body>
+  <div id="wash"></div>
+  <div id="stage"><canvas id="scene"></canvas></div>
+
+  <div id="scroller"></div>
+
+  <div class="overlay">
+    <div class="topbar">
+      <div class="brand">CROWN <b>BAR</b></div>
+      <div class="pill">15K HYPERMAX · NICOTINE FREE</div>
+    </div>
+
+    <div class="cols">
+      <div class="col left">
+        <div class="kicker swap" id="kicker">Flavor 01</div>
+        <h1 class="flavor-en swap" id="fEn">Berry Ice</h1>
+        <div class="flavor-jp swap" id="fJp">ベリーアイス</div>
+      </div>
+      <div class="col right">
+        <p class="desc swap" id="desc"></p>
+        <ul class="notes swap" id="notes"></ul>
+      </div>
+    </div>
+
+    <div class="rail" id="rail"></div>
+
+    <div class="hint" id="hint"><span>Scroll</span><span class="line"></span></div>
+  </div>
+
+  <div id="veil">PREPARING THE MIST…</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+/* ----------------------------------------------------------------- *
+ *  FLAVORS — full lineup. `hue` = degrees to rotate the RED base
+ *  device band to reach this flavor's colour (lerped on scroll).
+ * ----------------------------------------------------------------- */
+const FLAVORS = [
+  { en:'Berry Ice',            jp:'ベリーアイス',           color:'#c63b7e', soft:'#ff7ab0', hue:322,
+    desc:'数種のベリーが弾ける、ひんやり爽快なアイスベリー。', notes:['Mixed Berry','Icy Cool','Sweet'] },
+  { en:'Grape Mint',           jp:'グレープミント',         color:'#8a4fe0', soft:'#b07cff', hue:272,
+    desc:'甘くジューシーなぶどうに、清涼ミントが重なる王道ブレンド。', notes:['Juicy Grape','Cooling Mint','Smooth'] },
+  { en:'Grape',                jp:'グレープ',               color:'#7a3fd6', soft:'#a878ff', hue:266,
+    desc:'完熟ぶどうの濃厚な甘みが広がる、王道のグレープ。', notes:['Ripe Grape','Rich Sweet','Classic'] },
+  { en:'Lemon Lime',           jp:'レモンライム',           color:'#b9d534', soft:'#e2f06a', hue:78,
+    desc:'柑橘が弾けるシトラスの爽快感。キレのある人気フレーバー。', notes:['Zesty Lemon','Lime','Refreshing'] },
+  { en:'Lemon Mint',           jp:'レモンミント',           color:'#9fe06b', soft:'#c8f59a', hue:95,
+    desc:'レモンの酸味に清涼ミント。すっきり爽やかな後味。', notes:['Lemon','Cool Mint','Crisp'] },
+  { en:'Space Dream',          jp:'スペースドリーム',       color:'#6a5cff', soft:'#9a8cff', hue:250,
+    desc:'神秘的に重なる果実の調べ。未知の余韻を描くミックス。', notes:['Mystery Mix','Cosmic','Sweet'] },
+  { en:'Magic Love',           jp:'マジックラブ',           color:'#ff4fa0', soft:'#ff86c2', hue:328,
+    desc:'甘く華やかなベリーとフルーツのときめきブレンド。', notes:['Sweet Berry','Floral','Playful'] },
+  { en:'Cool Mango',           jp:'クールマンゴー',         color:'#ff9f2b', soft:'#ffc062', hue:32,
+    desc:'完熟マンゴーの濃厚な甘さが広がる、南国感あふれるトロピカル。', notes:['Ripe Mango','Tropical','Icy Cool'] },
+  { en:'Mango Pine',           jp:'マンゴーパイン',         color:'#ffbf2e', soft:'#ffd877', hue:42,
+    desc:'マンゴーとパインが弾ける南国トロピカルブレンド。', notes:['Mango','Pineapple','Tropical'] },
+  { en:'Peach Ice',            jp:'ピーチアイス',           color:'#ff9a6b', soft:'#ffc0a0', hue:16,
+    desc:'熟した黄桃の濃厚な甘みと、ひんやり爽快感。', notes:['Ripe Peach','Juicy','Chilled'] },
+  { en:'Strawberry',           jp:'ストロベリー',           color:'#ff3d5e', soft:'#ff7a92', hue:0,
+    desc:'まるで苺そのもの。甘酸っぱく華やかなフルーティー。', notes:['Ripe Strawberry','Sweet & Tart','Juicy'] },
+  { en:'Two Apple',            jp:'トゥーアップル',         color:'#e23b45', soft:'#ff7a82', hue:356,
+    desc:'リンゴの甘酸っぱさが絶妙。シーシャ定番、王道の豊潤アップル。', notes:['Double Apple','Sweet-Tart','Classic'] },
+  { en:'Grape Berry',          jp:'グレープベリー',         color:'#a23fd0', soft:'#c87cf0', hue:292,
+    desc:'ぶどうとベリーが重なる、濃密なパープルブレンド。', notes:['Grape','Berry','Rich'] },
+  { en:'Orange Mint',          jp:'オレンジミント',         color:'#ff8326', soft:'#ffb066', hue:26,
+    desc:'オレンジの爽やかな甘みに、清涼ミントのキレ。', notes:['Orange','Cool Mint','Zesty'] },
+  { en:'Blueberry Raspberry',  jp:'ブルーベリーラズベリー', color:'#6450dd', soft:'#9486ff', hue:246,
+    desc:'ブルーベリーとラズベリーの甘酸っぱいベリーミックス。', notes:['Blueberry','Raspberry','Tart'] },
+  { en:'Blueberry Sour',       jp:'ブルーベリーサワー',     color:'#4a7bff', soft:'#84a6ff', hue:222,
+    desc:'ブルーベリーの甘みに、爽やかな酸味が弾ける。', notes:['Blueberry','Sour','Refreshing'] },
+  { en:'Pineapple Ice',        jp:'パイナップルアイス',     color:'#ecd23f', soft:'#fff07a', hue:50,
+    desc:'熟したパインの甘さとひんやり感。爽やかな清涼。', notes:['Golden Pineapple','Tropical','Chilled'] },
+  { en:'Watermelon Pine',      jp:'ウォーターメロンパイン', color:'#ff5a6e', soft:'#ff8c9c', hue:350,
+    desc:'みずみずしいスイカとパインの爽やかブレンド。', notes:['Watermelon','Pineapple','Juicy'] },
+  { en:'Summer Dream',         jp:'サマードリーム',         color:'#ff7a4d', soft:'#ffa982', hue:14,
+    desc:'太陽きらめくトロピカルフルーツのサマーブレンド。', notes:['Tropical','Sunny','Sweet'] },
+  { en:'Blueberry Lemonade',   jp:'ブルーベリーレモネード', color:'#4f86ff', soft:'#8aaeff', hue:224,
+    desc:'ブルーベリーとレモネードの、甘酸っぱく爽快な味わい。', notes:['Blueberry','Lemonade','Fizzy'] },
+];
+const N = FLAVORS.length;
+
+/* build scroll panels + rail dots to match the lineup */
+const scroller = document.getElementById('scroller');
+for (let i=0;i<N+1;i++){ const s=document.createElement('section'); s.className='panel'; scroller.appendChild(s); }
+
+/* ----------------------------------------------------------------- *
+ *  RENDERER / SCENE
+ * ----------------------------------------------------------------- */
+const canvas = document.getElementById('scene');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+camera.position.set(0, 0.3, 7.2);
+
+/* ----------------------------------------------------------------- *
+ *  DEVICE — real CROWN BAR photo, band hue-morphs per flavor
+ * ----------------------------------------------------------------- */
+const texLoader = new THREE.TextureLoader();
+const deviceTex = texLoader.load('device.png', () => boot());
+deviceTex.colorSpace = THREE.SRGBColorSpace;
+deviceTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+const DEV_RATIO = 0.3286;
+const DEV_H = 4.0;
+const deviceMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: true,
+  uniforms: { uTex:{ value:deviceTex }, uHue:{ value:FLAVORS[0].hue*Math.PI/180 } },
+  vertexShader: `
+    varying vec2 vUv;
+    void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `
+    precision highp float;
+    uniform sampler2D uTex; uniform float uHue; varying vec2 vUv;
+    vec3 hueRot(vec3 c, float a){
+      const vec3 k = vec3(0.57735);
+      float ca = cos(a);
+      return c*ca + cross(k,c)*sin(a) + k*dot(k,c)*(1.0-ca);
+    }
+    void main(){
+      vec4 t = texture2D(uTex, vUv);
+      if (t.a < 0.02) discard;
+      vec3 c = clamp(hueRot(t.rgb, uHue), 0.0, 1.0);
+      gl_FragColor = vec4(c, t.a);
+    }`,
+});
+const device = new THREE.Mesh(new THREE.PlaneGeometry(DEV_H*DEV_RATIO, DEV_H), deviceMat);
+device.position.y = -0.25;
+scene.add(device);
+
+const TOP_Y  = device.position.y + DEV_H/2;
+const EMIT_Y = TOP_Y - 0.42;
+
+/* ----------------------------------------------------------------- *
+ *  SMOKE TEXTURE — baked fBm puff WITH volumetric shading
+ * ----------------------------------------------------------------- */
+function makeSmokeTexture() {
+  const S = 256;
+  const cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const ctx = cv.getContext('2d');
+  const img = ctx.createImageData(S, S);
+  const d = img.data;
+
+  const rand = (x,y) => { const n = Math.sin(x*127.1 + y*311.7) * 43758.5453; return n - Math.floor(n); };
+  const sm = t => t*t*(3-2*t);
+  const vnoise = (x,y) => {
+    const xi=Math.floor(x), yi=Math.floor(y), xf=x-xi, yf=y-yi;
+    const tl=rand(xi,yi), tr=rand(xi+1,yi), bl=rand(xi,yi+1), br=rand(xi+1,yi+1);
+    const u=sm(xf), v=sm(yf);
+    return tl*(1-u)*(1-v) + tr*u*(1-v) + bl*(1-u)*v + br*u*v;
+  };
+  const fbm = (x,y) => { let a=0,amp=0.55,f=1; for(let o=0;o<6;o++){a+=amp*vnoise(x*f,y*f);f*=2;amp*=0.5;} return a; };
+  const NS = (x,y) => fbm(x*5.0 + 11.0, y*5.0 + 7.0);
+
+  const lx=-0.5, ly=0.78, lz=0.38;                     // light: upper-left, toward viewer
+  for (let y=0; y<S; y++) for (let x=0; x<S; x++) {
+    const px=x/S, py=y/S, e=1.0/S;
+    const n  = NS(px,py);
+    const nx = NS(px+e,py), ny = NS(px,py+e);
+    const dx=px-0.5, dy=py-0.5;
+    const r = Math.sqrt(dx*dx+dy*dy)*2.0;
+    const mask = 1.0 - sm(Math.min(1, Math.max(0,(r-0.16)/0.84)));
+    let a = mask*(0.30 + 0.85*n);
+    a = sm(Math.min(1, Math.max(0,(a-0.16)/0.66)));
+    const gx=(nx-n)/e, gy=(ny-n)/e;
+    const nl = Math.hypot(gx,gy,0.9) || 1.0;
+    const Nx=-gx/nl, Ny=-gy/nl, Nz=0.9/nl;
+    let diff = Nx*lx + Ny*ly + Nz*lz; if (diff<0) diff=0;
+    let bri = 0.40 + 0.74*diff; if (bri>1) bri=1;       // lit crown, shadowed underside
+    const c = Math.round(bri*255);
+    const i = (y*S+x)*4;
+    d[i]=c; d[i+1]=c; d[i+2]=c;
+    d[i+3]=Math.round(Math.min(1,a)*255);
+  }
+  ctx.putImageData(img,0,0);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const smokeTex = makeSmokeTexture();
+
+/* ----------------------------------------------------------------- *
+ *  SMOKE PARTICLES — dense rotating volumetric billboards
+ * ----------------------------------------------------------------- */
+const MAX = 1800;
+const pos    = new Float32Array(MAX*3);
+const aSize  = new Float32Array(MAX);
+const aAlpha = new Float32Array(MAX);
+const aRot   = new Float32Array(MAX);
+const aBright= new Float32Array(MAX);
+const P = [];
+for (let i=0;i<MAX;i++){
+  P.push({ x:0,y:0,z:0, vx:0,vy:0,vz:0, life:0, max:1, rot:0, rotV:0, base:0, bright:1, seed:Math.random()*6.28, dead:true });
+}
+
+const sGeo = new THREE.BufferGeometry();
+sGeo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+sGeo.setAttribute('aSize',   new THREE.BufferAttribute(aSize,1));
+sGeo.setAttribute('aAlpha',  new THREE.BufferAttribute(aAlpha,1));
+sGeo.setAttribute('aRot',    new THREE.BufferAttribute(aRot,1));
+sGeo.setAttribute('aBright', new THREE.BufferAttribute(aBright,1));
+
+const smokeMat = new THREE.ShaderMaterial({
+  transparent:true, depthWrite:false, depthTest:true, blending:THREE.NormalBlending,
+  uniforms: { uTex:{value:smokeTex}, uColor:{value:new THREE.Color(0xeceaf0)} },
+  vertexShader: `
+    attribute float aSize; attribute float aAlpha; attribute float aRot; attribute float aBright;
+    varying float vA; varying float vRot; varying float vB;
+    void main(){
+      vA=aAlpha; vRot=aRot; vB=aBright;
+      vec4 mv = modelViewMatrix * vec4(position,1.0);
+      gl_PointSize = min(280.0, aSize * (300.0 / -mv.z));
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: `
+    precision highp float;
+    uniform sampler2D uTex; uniform vec3 uColor;
+    varying float vA; varying float vRot; varying float vB;
+    void main(){
+      vec2 p = gl_PointCoord - 0.5;
+      float c = cos(vRot), s = sin(vRot);
+      vec2 rp = vec2(p.x*c - p.y*s, p.x*s + p.y*c) + 0.5;
+      vec4 t = texture2D(uTex, rp);
+      float a = t.a * vA;
+      if (a < 0.003) discard;
+      gl_FragColor = vec4(uColor * t.rgb * vB, a);   // t.rgb carries baked light/shadow
+    }`,
+});
+const smoke = new THREE.Points(sGeo, smokeMat);
+smoke.frustumCulled = false;
+scene.add(smoke);
+
+let emitAcc = 0;
+function spawn(expand){
+  for (let i=0;i<MAX;i++){
+    const p = P[i];
+    if (!p.dead) continue;
+    p.dead = false;
+    p.x = (Math.random()-0.5)*0.10;
+    p.y = EMIT_Y + Math.random()*0.05;
+    p.z = 0.15 + Math.random()*0.32;
+    p.vx = (Math.random()-0.5)*0.10;
+    p.vy = 0.55 + Math.random()*0.5;
+    p.vz = (Math.random()-0.5)*0.07;
+    p.life = 0;
+    p.max = 2.8 + Math.random()*2.0 + expand*2.8;
+    p.rot = Math.random()*6.28;
+    p.rotV = (Math.random()-0.5)*0.5;
+    p.base = 26 + Math.random()*40;
+    p.bright = 0.66 + Math.random()*0.42;
+    p.seed = Math.random()*6.28;
+    return;
+  }
+}
+
+function updateSmoke(dt, expand, reduced){
+  const rate = (reduced ? 110 : 300) * (0.55 + expand*1.25);
+  emitAcc += rate*dt;
+  while (emitAcc > 1){ spawn(expand); emitAcc -= 1; }
+
+  const spread = 0.45 + expand*1.7;
+  const swirl  = reduced ? 0.25 : 1.0;
+
+  for (let i=0;i<MAX;i++){
+    const p = P[i];
+    if (p.dead){ aAlpha[i]=0; aSize[i]=0; continue; }
+    p.life += dt;
+    const t = p.life / p.max;
+    if (t >= 1){ p.dead=true; aAlpha[i]=0; aSize[i]=0; continue; }
+
+    const turb = (1.0 + t*2.4) * spread * swirl;
+    p.vx += Math.sin(p.y*1.7 + p.seed) * 0.05 * turb * dt * 6.0;
+    p.vz += Math.cos(p.y*1.4 + p.seed*1.7) * 0.04 * turb * dt * 6.0;
+    p.vy += 0.22 * dt;
+    p.vx *= 0.986; p.vz *= 0.986;
+    p.rot += p.rotV * dt;
+
+    p.x += p.vx*dt; p.y += p.vy*dt; p.z += p.vz*dt;
+
+    const idx=i*3;
+    pos[idx]=p.x; pos[idx+1]=p.y; pos[idx+2]=p.z;
+    aRot[i]=p.rot; aBright[i]=p.bright;
+    aSize[i]=p.base*(0.45 + t*(1.5 + expand*1.5));
+    const fade = Math.sin(Math.min(t,1)*Math.PI);
+    aAlpha[i] = fade * (0.34 - expand*0.06);          // dense overlap, no whiteout
+  }
+  sGeo.attributes.position.needsUpdate = true;
+  sGeo.attributes.aSize.needsUpdate = true;
+  sGeo.attributes.aAlpha.needsUpdate = true;
+  sGeo.attributes.aRot.needsUpdate = true;
+  sGeo.attributes.aBright.needsUpdate = true;
+}
+
+/* ----------------------------------------------------------------- *
+ *  SCROLL → STATE
+ * ----------------------------------------------------------------- */
+let progress = 0, target = 0;
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function onScroll(){
+  const max = document.documentElement.scrollHeight - innerHeight;
+  target = max > 0 ? Math.min(1, Math.max(0, scrollY/max)) : 0;
+}
+addEventListener('scroll', onScroll, { passive:true });
+onScroll();
+
+const cA=new THREE.Color(), cB=new THREE.Color(), cMix=new THREE.Color();
+const smokeBase = new THREE.Color(0xeceaf0);
+
+const el = {
+  kicker:document.getElementById('kicker'),
+  fEn:document.getElementById('fEn'), fJp:document.getElementById('fJp'),
+  desc:document.getElementById('desc'), notes:document.getElementById('notes'),
+  hint:document.getElementById('hint'),
+};
+const root = document.documentElement.style;
+
+const rail = document.getElementById('rail');
+const dots = FLAVORS.map(()=>{ const d=document.createElement('span'); d.className='dot'; rail.appendChild(d); return d; });
+
+let shownIndex = -1;
+function setCopy(i){
+  if (i === shownIndex) return;
+  shownIndex = i;
+  const f = FLAVORS[i];
+  const swaps = document.querySelectorAll('.swap');
+  swaps.forEach(s => s.classList.add('out'));
+  setTimeout(()=>{
+    el.kicker.textContent = 'Flavor ' + String(i+1).padStart(2,'0') + ' / ' + String(N).padStart(2,'0');
+    el.fEn.textContent = f.en;
+    el.fJp.textContent = f.jp;
+    el.desc.textContent = f.desc;
+    el.notes.replaceChildren();
+    f.notes.forEach(n => { const li=document.createElement('li'); li.textContent=n; el.notes.appendChild(li); });
+    swaps.forEach(s => s.classList.remove('out'));
+  }, 240);
+  dots.forEach((d,k)=> d.classList.toggle('on', k===i));
+}
+setCopy(0);
+
+function lerpAngle(a,b,t){
+  let d=(b-a)%360; if (d>180) d-=360; if (d<-180) d+=360;
+  return a + d*t;
+}
+
+/* ----------------------------------------------------------------- *
+ *  RENDER LOOP
+ * ----------------------------------------------------------------- */
+let last = performance.now();
+function tick(now){
+  const dt = Math.min(0.05,(now-last)/1000); last = now;
+  progress += (target - progress) * (reduced ? 1 : 0.08);
+
+  const f = progress*(N-1);
+  const i0 = Math.floor(f), i1 = Math.min(N-1, i0+1), frac = f - i0;
+  const expand = Math.pow(progress, 0.85);
+
+  const hue = lerpAngle(FLAVORS[i0].hue, FLAVORS[i1].hue, frac);
+  deviceMat.uniforms.uHue.value = hue * Math.PI/180;
+
+  cA.set(FLAVORS[i0].color); cB.set(FLAVORS[i1].color);
+  cMix.copy(cA).lerp(cB, frac);
+  smokeMat.uniforms.uColor.value.copy(smokeBase).lerp(cMix, 0.16);
+
+  const sA = new THREE.Color(FLAVORS[i0].soft), sB = new THREE.Color(FLAVORS[i1].soft);
+  const softMix = sA.lerp(sB, frac);
+  root.setProperty('--flavor', '#'+cMix.getHexString());
+  root.setProperty('--flavor-soft', '#'+softMix.getHexString());
+
+  setCopy(Math.round(f));
+  el.hint.style.opacity = progress > 0.03 ? '0' : '1';
+
+  const time = now/1000;
+  if (!reduced){
+    device.rotation.y = Math.sin(time*0.35)*0.06;
+    device.position.x = Math.sin(time*0.5)*0.015;
+  }
+  camera.position.z = 7.2 + expand*1.7;
+  camera.position.y = 0.3 + expand*0.8;
+  camera.lookAt(0, 0.5 + expand*0.9, 0);
+
+  updateSmoke(dt, expand, reduced);
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+
+function resize(){
+  const w=innerWidth, h=innerHeight;
+  renderer.setSize(w,h,false);
+  camera.aspect = w/h; camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+requestAnimationFrame(tick);
+
+let booted = false;
+function boot(){ if (booted) return; booted = true; document.getElementById('veil').classList.add('gone'); }
+setTimeout(boot, 2500);
+</script>
+</body>
+</html>
